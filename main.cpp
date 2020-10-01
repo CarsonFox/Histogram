@@ -20,6 +20,7 @@ std::vector<Range> chunkData(std::vector<float> &data, int n);
 std::vector<Bin> getBins(float min, float max, int n);
 void report(const std::vector<Bin> &bins);
 void count(Range range, std::vector<Bin> &global_bins, std::mutex &mutex, float min, float max);
+void globalSum(const std::vector<Bin> &local_bins, std::vector<Bin> &global_bins, std::mutex &mutex);
 
 int main(int argc, char **argv) {
     if (argc < 6) {
@@ -66,6 +67,12 @@ int main(int argc, char **argv) {
     return 0;
 }
 
+void globalSum(const std::vector<Bin> &local_bins, std::vector<Bin> &global_bins, std::mutex &mutex) {
+    //Once the data has been processed, add the local bin sums to the global bins
+    std::lock_guard<std::mutex> lock_guard(mutex);
+    std::transform(local_bins.begin(), local_bins.end(), global_bins.begin(), global_bins.begin(), std::plus<Bin>{});
+}
+
 void count(const Range range, std::vector<Bin> &global_bins, std::mutex &mutex, const float min, const float max) {
     const auto begin = range.first, end = range.second;
 
@@ -78,9 +85,8 @@ void count(const Range range, std::vector<Bin> &global_bins, std::mutex &mutex, 
         ++(*bin);
     });
 
-    //Once the data has been processed, add the local bin sums to the global bins
-    std::lock_guard<std::mutex> lock_guard(mutex);
-    std::transform(local_bins.begin(), local_bins.end(), global_bins.begin(), global_bins.begin(), std::plus<Bin>{});
+    //Sum our results
+    globalSum(local_bins, global_bins, mutex);
 }
 
 void report(const std::vector<Bin> &bins) {
