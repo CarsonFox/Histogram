@@ -1,10 +1,11 @@
 #include <iostream>
 #include <vector>
 #include <algorithm>
-#include <mutex>
 #include <thread>
+#include <mutex>
 
 #include <cstdlib>
+#include <cassert>
 
 /*
  * Use a pair of iterators to represent a subset of the data
@@ -16,7 +17,7 @@ float randomFloat(float min, float max);
 std::vector<float> generateData(int count, float min, float max);
 std::vector<Range> chunkData(std::vector<float> &data, int n);
 size_t findBin(float x, float min, float max, int bins);
-void count(Range r, std::vector<int> &global_bins, std::mutex &mutex, float min, float max, int bin_count);
+void reportBinMaxes(float min, float max, int bin_count);
 
 int main(int argc, char **argv) {
     if (argc < 6) {
@@ -41,50 +42,74 @@ int main(int argc, char **argv) {
      */
     auto data = generateData(data_count, min_meas, max_meas);
     const auto chunks = chunkData(data, num_threads);
-    std::vector<int> global_bins(bin_count, 0);
-    std::mutex mutex;
+    std::vector<int> global_counts(bin_count, 0);
     std::vector<std::thread> threads;
+    std::mutex mutex;
 
     for (const auto &chunk: chunks) {
-        threads.emplace_back([&](){count(chunk, global_bins, mutex, min_meas, max_meas, bin_count);});
+        //Spawn threads for each chunk of data
+        threads.emplace_back([&](){
+            //Local counts to avoid synchronization until the end
+            std::vector<int> local_counts(bin_count, 0);
+
+            //Find the bin for each data point in the chunk
+            std::for_each(chunk.first, chunk.second, [&](const float x) {
+                local_counts[findBin(x, min_meas, max_meas, bin_count)]++;
+            });
+
+            //Lock the mutex, then add results to global sum
+            std::lock_guard<std::mutex> guard(mutex);
+
+            std::transform(local_counts.begin(), local_counts.end(),
+                global_counts.begin(), global_counts.begin(),
+                std::plus<int>{});
+        });
     }
 
     for (auto &thread: threads) {
         thread.join();
     }
 
+    return 0;
+
+    reportBinMaxes(min_meas, max_meas, bin_count);
+
     std::cout << "Bin counts: ";
-    for (const auto x: global_bins) {
+    for (int x: global_counts) {
         std::cout << x << ' ';
     }
-    std::cout << std::endl;
+    std::cout << '\n';
 }
 
-void count(Range r, std::vector<int> &global_bins, std::mutex &mutex, float min, float max, int bin_count) {
-    std::vector<int> local_bins(bin_count, 0);
-    std::for_each(r.first, r.second, [&](float x){
-        local_bins[findBin(x, min, max, bin_count)]++;
-    });
+//Print the max value for each bin
+void reportBinMaxes(float min, float max, int bin_count) {
+    const auto binSize = (max - min) / static_cast<float>(bin_count);
 
-    std::lock_guard<std::mutex> guard(mutex);
-    std::transform(local_bins.begin(), local_bins.end(), global_bins.begin(), global_bins.begin(), std::plus<float>{});
+    std::cout << "Bin maxes: ";
+    for (int i = 1; i <= bin_count; i++) {
+        std::cout << binSize * i << ' ';
+    }
+    std::cout << '\n';
 }
 
+//Compute the bin for a given data point
 size_t findBin(float x, float min, float max, int bins) {
     const auto binSize = (max - min) / static_cast<float>(bins);
     return std::min(static_cast<size_t>((x - min) / binSize), static_cast<size_t>(bins - 1));
 }
 
-//Split the data into chunks, to divide the work between threads
+//Split the data into chunks
 std::vector<Range> chunkData(std::vector<float> &data, int n) {
     std::vector<Range> chunks;
     const auto chunk_size = data.size() / n;
 
+    //Chunks are represented by pairs of iterators
     for (int i = 0; i < n - 1; i++) {
         auto chunk_begin = data.begin() + chunk_size * i;
         chunks.emplace_back(std::make_pair(chunk_begin, chunk_begin + chunk_size));
     }
 
+    //The last chunk may not be exactly the same size
     chunks.emplace_back(std::make_pair(data.begin() + (n - 1) * chunk_size, data.end()));
 
     return chunks;
