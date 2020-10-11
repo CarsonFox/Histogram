@@ -5,7 +5,6 @@
 #include <mutex>
 
 #include <cstdlib>
-#include <cassert>
 
 /*
  * Use a pair of iterators to represent a subset of the data
@@ -60,17 +59,17 @@ int main(int argc, char **argv) {
             //Lock the mutex, then add results to global sum
             std::lock_guard<std::mutex> guard(mutex);
 
+            //Black magic to add two vectors
             std::transform(local_counts.begin(), local_counts.end(),
                 global_counts.begin(), global_counts.begin(),
                 std::plus<int>{});
         });
     }
 
+    //Wait for every thread to finish
     for (auto &thread: threads) {
         thread.join();
     }
-
-    return 0;
 
     reportBinMaxes(min_meas, max_meas, bin_count);
 
