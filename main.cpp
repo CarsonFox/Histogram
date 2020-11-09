@@ -34,14 +34,20 @@ int main(int argc, char **argv) {
         MPI_Comm_size(comm, &comm_size);
         MPI_Comm_rank(comm, &rank);
 
-        //Make sure the data is evenly divisible by number of processes
-        assert(data_count % comm_size == 0);
-        const int dataChunkSize = data_count / comm_size;
+        //Some math to support data sizes that don't divide evenly
+        const int remainder = (data_count % comm_size) ? comm_size - (data_count % comm_size) : 0;
+        const int dataChunkSize = data_count / comm_size + !!remainder;
 
         //Process 0 initializes the data
         std::vector<float> generatedData;
         if (rank == 0) {
             generatedData = generateData(data_count, min_meas, max_meas);
+
+            //Make sure the data is evenly divisible by number of processes
+            for (int i = 0; i < remainder; i++) {
+                generatedData.push_back(0);
+            }
+            assert(generatedData.size() == dataChunkSize * comm_size);
         }
 
         //Local buffer to receive into
@@ -49,6 +55,13 @@ int main(int argc, char **argv) {
 
         //Distribute generated data
         MPI_Scatter(generatedData.data(), dataChunkSize, MPI_FLOAT, localData.data(), dataChunkSize, MPI_FLOAT, 0, comm);
+
+        //Special case: remove dummy data
+        if (rank + 1 == comm_size) {
+            for (int i = 0; i < remainder; i++) {
+                localData.pop_back();
+            }
+        }
 
         //Count the bins for our local data
         auto bins = countBins(localData, min_meas, max_meas, bin_count);
