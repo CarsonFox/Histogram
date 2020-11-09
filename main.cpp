@@ -4,6 +4,8 @@
 
 #include <cstdlib>
 
+#include <mpi.h>
+
 /*
  * Use a pair of iterators to represent a subset of the data
  */
@@ -17,37 +19,37 @@ size_t findBin(float x, float min, float max, int bins);
 void reportBinMaxes(float min, float max, int bin_count);
 
 int main(int argc, char **argv) {
-    if (argc < 6) {
-        std::cerr << "Invalid number of arguments\n";
+    if (argc < 5) {
+        std::cerr << "Usage: ./Histogram bins min max data_count" << std::endl;
         std::exit(1);
     }
 
-    int num_threads, bin_count, data_count;
-    float min_meas, max_meas;
+    //Get user input
+    int bin_count = std::atoi(argv[1]);
+    float min_meas = std::atof(argv[2]), max_meas = std::atof(argv[3]);
+    int data_count = std::atoi(argv[4]);
 
-    /*
-     * Get user input
-     */
-    num_threads = std::atoi(argv[1]);
-    bin_count = std::atoi(argv[2]);
-    min_meas = std::atof(argv[3]);
-    max_meas = std::atof(argv[4]);
-    data_count = std::atoi(argv[5]);
-
-    /*
-     * Set up shared variables
-     */
+    //Set up shared variables
     auto data = generateData(data_count, min_meas, max_meas);
-    const auto chunks = chunkData(data, num_threads);
+    const auto chunks = chunkData(data, 1);
     std::vector<int> global_counts(bin_count, 0);
 
-    reportBinMaxes(min_meas, max_meas, bin_count);
+    //MPI variables
+    int comm_size, rank;
+    const auto comm = MPI_COMM_WORLD;
 
-    std::cout << "Bin counts: ";
-    for (int x: global_counts) {
-        std::cout << x << ' ';
+    //Begin distributed section
+    MPI_Init(nullptr, nullptr); {
+        MPI_Comm_size(comm, &comm_size);
+        MPI_Comm_rank(comm, &rank);
+
+        std::cout << "Hello from process " << rank << '!' << std::endl;
+        std::cout << "Comm size: " << comm_size << std::endl;
+
+        MPI_Finalize();
     }
-    std::cout << '\n';
+
+    return 0;
 }
 
 //Print the max value for each bin
@@ -95,3 +97,11 @@ std::vector<float> generateData(int count, float min, float max) {
     std::generate_n(data.begin(), count, [=](){ return randomFloat(min, max); });
     return data;
 }
+
+//    reportBinMaxes(min_meas, max_meas, bin_count);
+//
+//    std::cout << "Bin counts: ";
+//    for (int x: global_counts) {
+//        std::cout << x << ' ';
+//    }
+//    std::cout << '\n';
