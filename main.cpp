@@ -33,7 +33,7 @@ int main(int argc, char **argv) {
     MPI_Init(nullptr, nullptr); {
         MPI_Comm_size(comm, &comm_size);
         MPI_Comm_rank(comm, &rank);
-        double start = MPI_Wtime();
+//        double start = MPI_Wtime();
 
         //Some math to support data sizes that don't divide evenly
         const int remainder = (data_count % comm_size) ? comm_size - (data_count % comm_size) : 0;
@@ -74,10 +74,10 @@ int main(int argc, char **argv) {
             std::vector<int> globalBins(bin_count, 0);
             MPI_Reduce(bins.data(), globalBins.data(), bin_count, MPI_INT, MPI_SUM, 0, comm);
 
-//            reportBinMaxes(min_meas, max_meas, bin_count);
-//            reportBinCounts(globalBins);
+            reportBinMaxes(min_meas, max_meas, bin_count);
+            reportBinCounts(globalBins);
 
-            std::cout << comm_size << ',' << data_count << ',' << MPI_Wtime() - start << ',' << std::endl;
+//            std::cout << comm_size << ',' << data_count << ',' << MPI_Wtime() - start << ',' << std::endl;
         }
 
         MPI_Finalize();
