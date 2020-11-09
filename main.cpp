@@ -1,8 +1,6 @@
 #include <iostream>
 #include <vector>
 #include <algorithm>
-#include <thread>
-#include <mutex>
 
 #include <cstdlib>
 
@@ -42,34 +40,6 @@ int main(int argc, char **argv) {
     auto data = generateData(data_count, min_meas, max_meas);
     const auto chunks = chunkData(data, num_threads);
     std::vector<int> global_counts(bin_count, 0);
-    std::vector<std::thread> threads;
-    std::mutex mutex;
-
-    for (const auto &chunk: chunks) {
-        //Spawn threads for each chunk of data
-        threads.emplace_back([&](){
-            //Local counts to avoid synchronization until the end
-            std::vector<int> local_counts(bin_count, 0);
-
-            //Find the bin for each data point in the chunk
-            std::for_each(chunk.first, chunk.second, [&](const float x) {
-                local_counts[findBin(x, min_meas, max_meas, bin_count)]++;
-            });
-
-            //Lock the mutex, then add results to global sum
-            std::lock_guard<std::mutex> guard(mutex);
-
-            //Black magic to add two vectors
-            std::transform(local_counts.begin(), local_counts.end(),
-                global_counts.begin(), global_counts.begin(),
-                std::plus<int>{});
-        });
-    }
-
-    //Wait for every thread to finish
-    for (auto &thread: threads) {
-        thread.join();
-    }
 
     reportBinMaxes(min_meas, max_meas, bin_count);
 
