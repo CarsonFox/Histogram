@@ -3,20 +3,16 @@
 #include <algorithm>
 
 #include <cstdlib>
+#include <cassert>
 
 #include <mpi.h>
 
-/*
- * Use a pair of iterators to represent a subset of the data
- */
-using VecIter = std::vector<float>::iterator;
-using Range = std::pair<VecIter, VecIter>;
-
 float randomFloat(float min, float max);
 std::vector<float> generateData(int count, float min, float max);
-std::vector<Range> chunkData(std::vector<float> &data, int n);
+std::vector<int> countBins(std::vector<float> &data, float min, float max, int bin_count);
 size_t findBin(float x, float min, float max, int bins);
 void reportBinMaxes(float min, float max, int bin_count);
+void reportBinCounts(const std::vector<int> &bins);
 
 int main(int argc, char **argv) {
     if (argc < 5) {
@@ -29,11 +25,6 @@ int main(int argc, char **argv) {
     float min_meas = std::atof(argv[2]), max_meas = std::atof(argv[3]);
     int data_count = std::atoi(argv[4]);
 
-    //Set up shared variables
-    auto data = generateData(data_count, min_meas, max_meas);
-    const auto chunks = chunkData(data, 1);
-    std::vector<int> global_counts(bin_count, 0);
-
     //MPI variables
     int comm_size, rank;
     const auto comm = MPI_COMM_WORLD;
@@ -43,13 +34,48 @@ int main(int argc, char **argv) {
         MPI_Comm_size(comm, &comm_size);
         MPI_Comm_rank(comm, &rank);
 
-        std::cout << "Hello from process " << rank << '!' << std::endl;
-        std::cout << "Comm size: " << comm_size << std::endl;
+        //Make sure the data is evenly divisible by number of processes
+        assert(data_count % comm_size == 0);
+        const int dataChunkSize = data_count / comm_size;
+
+        //Process 0 initializes the data
+        std::vector<float> generatedData;
+        if (rank == 0) {
+            generatedData = generateData(data_count, min_meas, max_meas);
+        }
+
+        //Local buffer to receive into
+        std::vector<float> localData(dataChunkSize);
+
+        //Distribute generated data
+        MPI_Scatter(generatedData.data(), dataChunkSize, MPI_FLOAT, localData.data(), dataChunkSize, MPI_FLOAT, 0, comm);
+
+        //Count the bins for our local data
+        auto bins = countBins(localData, min_meas, max_meas, bin_count);
+
+        //Sum the results, and have process 0 print them
+        if (rank > 0) {
+            MPI_Reduce(bins.data(), nullptr, bin_count, MPI_INT, MPI_SUM, 0, comm);
+        } else {
+            std::vector<int> globalBins(bin_count, 0);
+            MPI_Reduce(bins.data(), globalBins.data(), bin_count, MPI_INT, MPI_SUM, 0, comm);
+
+            reportBinMaxes(min_meas, max_meas, bin_count);
+            reportBinCounts(globalBins);
+        }
 
         MPI_Finalize();
     }
 
     return 0;
+}
+
+std::vector<int> countBins(std::vector<float> &data, float min, float max, int bin_count) {
+    std::vector<int> bins(bin_count, 0);
+    std::for_each(data.begin(), data.end(), [&](float x) {
+        bins[findBin(x, min, max, bin_count)]++;
+    });
+    return bins;
 }
 
 //Print the max value for each bin
@@ -63,27 +89,19 @@ void reportBinMaxes(float min, float max, int bin_count) {
     std::cout << '\n';
 }
 
+void reportBinCounts(const std::vector<int> &bins) {
+    std::cout << "Bin counts: ";
+    for (int x : bins) {
+        std::cout << x << ' ';
+    }
+    std::cout << std::endl;
+
+}
+
 //Compute the bin for a given data point
 size_t findBin(float x, float min, float max, int bins) {
     const auto binSize = (max - min) / static_cast<float>(bins);
     return std::min(static_cast<size_t>((x - min) / binSize), static_cast<size_t>(bins - 1));
-}
-
-//Split the data into chunks
-std::vector<Range> chunkData(std::vector<float> &data, int n) {
-    std::vector<Range> chunks;
-    const auto chunk_size = data.size() / n;
-
-    //Chunks are represented by pairs of iterators
-    for (int i = 0; i < n - 1; i++) {
-        auto chunk_begin = data.begin() + chunk_size * i;
-        chunks.emplace_back(std::make_pair(chunk_begin, chunk_begin + chunk_size));
-    }
-
-    //The last chunk may not be exactly the same size
-    chunks.emplace_back(std::make_pair(data.begin() + (n - 1) * chunk_size, data.end()));
-
-    return chunks;
 }
 
 //Get a random float in the range [min, max]
@@ -97,11 +115,3 @@ std::vector<float> generateData(int count, float min, float max) {
     std::generate_n(data.begin(), count, [=](){ return randomFloat(min, max); });
     return data;
 }
-
-//    reportBinMaxes(min_meas, max_meas, bin_count);
-//
-//    std::cout << "Bin counts: ";
-//    for (int x: global_counts) {
-//        std::cout << x << ' ';
-//    }
-//    std::cout << '\n';
